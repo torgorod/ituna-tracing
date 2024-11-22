@@ -1,2 +1,5 @@
 random-address
 kafka-python
+opentelemetry-api
+opentelemetry-sdk
+opentelemetry-exporter-otlp

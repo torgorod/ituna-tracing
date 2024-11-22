@@ -32,6 +32,11 @@ services:
 
   jaeger:
     image: "jaegertracing/all-in-one:latest"
+    hostname: jaeger
+    container_name: jaeger
     platform: "linux/amd64"
+    expose:
+      - 4318:4318
     ports:
       - 16686:16686
+      - 4318:4318

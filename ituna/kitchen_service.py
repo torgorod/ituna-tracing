@@ -4,9 +4,15 @@ import json
 import time
 
 from kafka import KafkaConsumer
+from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
+
+from opentelemetry.trace import NonRecordingSpan, Span
+from opentelemetry import context, trace
+from opentelemetry.trace import SpanContext
 
 import config
 import log
+import tracer
 
 
 class KitchenService:
@@ -18,6 +24,7 @@ class KitchenService:
 
     def __init__(self):
         self.log = log.get_logger("kitchen-service")
+        self.tracer = tracer.get_tracer("kitchen-service")
         self.kafka_host = self.config.get("queue", "host")
         self.kafka_server_port = self.config.get("queue", "port")
         self.kafka_topic_kitchen = self.config.get("kitchen-queue", "queue-topic")
@@ -49,7 +56,11 @@ if __name__ == "__main__":
     kitchen_service.log.info("Starting Kitchen Service")
     for message in kitchen_service.kafka_consumer:
         order = message.value
-        order_id = order["order_id"]
-        kitchen_service.log.info(f"Received order {order_id} for processing")
-        prepared_order = kitchen_service.prepare_order(order)
-        kitchen_service.log.info(f"{prepared_order} - Order id = {order_id}" )
+        carrier = json.loads(order["carrier"])
+        ctx = TraceContextTextMapPropagator().extract(carrier=carrier)
+
+        with kitchen_service.tracer.start_span(name="main-kitchen", context=ctx):
+            order_id = order["order_id"]
+            kitchen_service.log.info(f"Received order {order_id} for processing")
+            prepared_order = kitchen_service.prepare_order(order)
+            kitchen_service.log.info(f"{prepared_order} - Order id = {order_id}")

@@ -5,9 +5,11 @@ import time
 
 from kafka import KafkaProducer
 from kafka.errors import KafkaError
+from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
 
 import config
 import log
+import tracer
 from random_values import make_random_order
 
 
@@ -20,6 +22,7 @@ class OnSiteOrdering:
 
     def __init__(self):
         self.log = log.get_logger("onsite-ordering")
+        self.tracer = tracer.get_tracer("onsite-ordering")
         self.kafka_host = self.config.get("queue", "host")
         self.kafka_server_port = self.config.get("queue", "port")
         self.kafka_topic = self.config.get("initial-order", "queue-topic")
@@ -54,8 +57,12 @@ if __name__ == "__main__":
     onsite_ordering = OnSiteOrdering()
     onsite_ordering.log.info("Starting On-Site Ordering Service")
     while True:
-        order = make_random_order(order_type="on-site")
-        onsite_ordering.log.info(f"Placing an on-site order with id {order['order_id']}")
-        onsite_ordering.place_an_order(order)
+        with onsite_ordering.tracer.start_as_current_span(name="main-onsite-order") as span:
+            carrier = {}
+            TraceContextTextMapPropagator().inject(carrier)
+            order = make_random_order(order_type="on-site")
+            order.update({"carrier": json.dumps(carrier)})
+            onsite_ordering.log.info(f"Placing an on-site order with id {order['order_id']}")
+            onsite_ordering.place_an_order(order)
         onsite_ordering.log.info("The on-site order has been placed successfully!")
         time.sleep(5)

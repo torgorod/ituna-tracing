@@ -5,9 +5,11 @@ import time
 
 from kafka import KafkaProducer, KafkaConsumer
 from kafka.errors import KafkaError
+from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
 
 import config
 import log
+import tracer
 
 
 class OrderValidation:
@@ -21,6 +23,7 @@ class OrderValidation:
 
     def __init__(self):
         self.log = log.get_logger("order-validation")
+        self.tracer = tracer.get_tracer("order-validation")
         self.kafka_host = self.config.get("queue", "host")
         self.kafka_server_port = self.config.get("queue", "port")
         self.kafka_topic_initial = self.config.get("initial-order", "queue-topic")
@@ -49,13 +52,17 @@ class OrderValidation:
         return self._kafka_consumer
 
     def validate_address(self, order):
-        time.sleep(self.simulated_delay_addr_val)
+        with self.tracer.start_span(name="address_validation") as span:
+            span.set_attribute("zip", 90901)
+            time.sleep(self.simulated_delay_addr_val)
 
     def validate_name(self, order):
-        time.sleep(self.simulated_delay_name_val)
+        with self.tracer.start_as_current_span(name="name_validation"):
+            time.sleep(self.simulated_delay_name_val)
 
     def validate_inventory(self, order):
-        time.sleep(self.simulated_delay_invent_val)
+        with self.tracer.start_as_current_span(name="inventory_validation"):
+            time.sleep(self.simulated_delay_invent_val)
 
     def validate_order(self, order):
         """
@@ -94,9 +101,13 @@ if __name__ == "__main__":
     order_validation.log.info("Starting Order Validation Service")
     for message in order_validation.kafka_consumer:
         order = message.value
-        order_id = order["order_id"]
-        order_validation.log.info(f"Received order {order_id} for validation")
-        validated_order = order_validation.validate_order(order)
-        if validated_order:
-            order_validation.place_an_order_for_kitchen(order)
-            order_validation.log.info(f"Validated and republished order for kitchen: {order['order_id']}")
+        carrier = json.loads(order["carrier"])
+        ctx = TraceContextTextMapPropagator().extract(carrier=carrier)
+
+        with order_validation.tracer.start_as_current_span(name="main-order-validation", context=ctx):
+            order_id = order["order_id"]
+            order_validation.log.info(f"Received order {order_id} for validation")
+            validated_order = order_validation.validate_order(order)
+            if validated_order:
+                order_validation.place_an_order_for_kitchen(order)
+                order_validation.log.info(f"Validated and republished order for kitchen: {order['order_id']}")

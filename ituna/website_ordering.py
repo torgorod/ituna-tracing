@@ -5,9 +5,11 @@ import time
 
 from kafka import KafkaProducer
 from kafka.errors import KafkaError
+from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
 
 import config
 import log
+import tracer
 from random_values import make_random_order
 
 
@@ -21,6 +23,7 @@ class WebsiteOrdering:
 
     def __init__(self):
         self.log = log.get_logger("website-ordering")
+        self.tracer = tracer.get_tracer("website-ordering")
         self.kafka_host = self.config.get("queue", "host")
         self.kafka_server_port = self.config.get("queue", "port")
         self.kafka_topic = self.config.get("initial-order", "queue-topic")
@@ -55,8 +58,12 @@ if __name__ == "__main__":
     website_ordering = WebsiteOrdering()
     website_ordering.log.info("Starting Website Ordering Service")
     while True:
-        order = make_random_order(order_type="website")
-        website_ordering.log.info(f"Placing an online order with id {order['order_id']}")
-        website_ordering.place_an_order(order)
+        with website_ordering.tracer.start_as_current_span(name="main-website-order") as span:
+            carrier = {}
+            TraceContextTextMapPropagator().inject(carrier)
+            order = make_random_order(order_type="website")
+            order.update({"carrier": json.dumps(carrier)})
+            website_ordering.log.info(f"Placing an online order with id {order['order_id']}")
+            website_ordering.place_an_order(order)
         website_ordering.log.info("The online order has been placed successfully!")
         time.sleep(5)

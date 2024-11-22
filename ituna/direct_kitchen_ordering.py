@@ -5,9 +5,11 @@ import time
 
 from kafka import KafkaProducer
 from kafka.errors import KafkaError
+from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
 
 import config
 import log
+import tracer
 from random_values import make_random_order
 
 
@@ -20,6 +22,7 @@ class DirectKitchenOrdering:
 
     def __init__(self):
         self.log = log.get_logger("direct-kitchen-ordering")
+        self.tracer = tracer.get_tracer("direct-kitchen-ordering")
         self.kafka_host = self.config.get("queue", "host")
         self.kafka_server_port = self.config.get("queue", "port")
         self.kafka_topic_kitchen = self.config.get("kitchen-queue", "queue-topic")
@@ -57,8 +60,12 @@ if __name__ == "__main__":
     direct_kitchen_ordering = DirectKitchenOrdering()
     direct_kitchen_ordering.log.info("Starting Direct Kitchen Ordering Service")
     while True:
-        order = make_random_order(order_type="on-site")
-        direct_kitchen_ordering.log.info(f"Placing a direct order for the kitchen: {order['order_id']}")
-        direct_kitchen_ordering.place_an_order_for_kitchen(order)
+        with direct_kitchen_ordering.tracer.start_as_current_span(name="main-direct-order") as span:
+            carrier = {}
+            TraceContextTextMapPropagator().inject(carrier)
+            order = make_random_order(order_type="on-site")
+            order.update({"carrier": json.dumps(carrier)})
+            direct_kitchen_ordering.log.info(f"Placing a direct order for the kitchen: {order['order_id']}")
+            direct_kitchen_ordering.place_an_order_for_kitchen(order)
+        direct_kitchen_ordering.log.info("The direct kitchen order has been placed successfully!")
         time.sleep(5)
-
